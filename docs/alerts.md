@@ -1,60 +1,61 @@
-# Template Alert và Runbook
+# Alert Runbooks
 
-Mỗi alert phải dựa trên triệu chứng người dùng hoặc SLO, không dựa trực tiếp vào tên implementation nội bộ.
+All investigations follow the same evidence order: Metrics -> Logs -> Traces.
+Use only sanitized logs and traces. Do not copy raw user input, secrets, or PII into a ticket.
 
-## Alert mẫu để tham khảo
+## HighLatencyP95
 
-Ví dụ dưới đây minh họa mức độ cụ thể cần có. Học viên không cần copy nguyên, nhưng ba alert trong bài nộp nên rõ ràng tương tự: điều kiện là gì, kéo dài bao lâu, ảnh hưởng tới user ra sao và người trực cần kiểm tra gì trước.
+- Signal: P95 of `response_sent.latency_ms` is above 3000 ms for 5 minutes.
+- Severity: warning.
+- User impact: users wait longer for an answer.
+- Owner and channel: `student-2A202602652`, Slack `#k4-l3b-alerts`.
 
-- Tên: `HighLatencyP95`
-- Severity: `warning`
-- Duration: `5m`
-- Kênh thông báo: Slack `#k4-l3b-alerts`
-- SLI/SLO liên quan: latency P95 của `response_sent.latency_ms`
-- Điều kiện và thời gian duy trì: `p95(latency_ms) > 3000ms` trong 5 phút
-- Ảnh hưởng tới người dùng: người dùng phải chờ lâu hơn trước khi nhận câu trả lời
-- Ba bước kiểm tra đầu tiên:
-  1. Mở dashboard latency để xác nhận P95/P99 và khoảng thời gian tăng.
-  2. Lọc `data/logs.jsonl` trong khoảng đó, lấy một `correlation_id` có `latency_ms` cao.
-  3. Mở trace cùng `correlation_id` trên Langfuse, so sánh các span chính để xác định bước nào bất thường.
-- Mitigation tạm thời: dựa trên evidence thực tế để rollback prompt, khôi phục cấu hình liên quan, tắt practice scenario hoặc giảm tải khi demo.
-- Owner: `student-<MSSV>`
+Initial investigation:
 
-## Alert 1
+1. Confirm the affected time range in the latency panel; compare P50, P95, P99, and TTFT P95.
+2. Filter `data/logs.jsonl` for `response_sent` records with high `latency_ms`; select a matching `correlation_id`.
+3. Open the Langfuse trace with that correlation ID and compare the `retrieval` and `llm-generation` durations.
 
-- Tên:
-- Severity:
-- Duration:
-- Kênh thông báo: Slack
-- SLI/SLO liên quan:
-- Điều kiện và thời gian duy trì:
-- Ảnh hưởng tới người dùng:
-- Ba bước kiểm tra đầu tiên:
-- Mitigation tạm thời:
-- Owner:
+Mitigation:
 
-## Alert 2
+- If retrieval is slow, disable the practice scenario, restore the vector-store configuration, or reduce retrieval work.
+- If generation is slow, rollback the prompt label or reduce prompt/context size after verifying the trace evidence.
+- Re-run the same workload and verify P95 returns below the threshold before resolving the alert.
 
-- Tên:
-- Severity:
-- Duration:
-- Kênh thông báo: Slack
-- SLI/SLO liên quan:
-- Điều kiện và thời gian duy trì:
-- Ảnh hưởng tới người dùng:
-- Ba bước kiểm tra đầu tiên:
-- Mitigation tạm thời:
-- Owner:
+## HighErrorRate
 
-## Alert 3
+- Signal: `request_failed / request_received` is above 2% for 5 minutes.
+- Severity: critical.
+- User impact: requests fail instead of returning an answer.
+- Owner and channel: `student-2A202602652`, Slack `#k4-l3b-alerts`.
 
-- Tên:
-- Severity:
-- Duration:
-- Kênh thông báo: Slack
-- SLI/SLO liên quan:
-- Điều kiện và thời gian duy trì:
-- Ảnh hưởng tới người dùng:
-- Ba bước kiểm tra đầu tiên:
-- Mitigation tạm thời:
-- Owner:
+Initial investigation:
+
+1. Confirm the error-rate panel and identify the error type and affected time range.
+2. Filter `request_failed` logs in that period and select a sanitized log line with a `correlation_id`.
+3. Open the trace with the same correlation ID; inspect the status and duration of `retrieval` and `llm-generation`.
+
+Mitigation:
+
+- For retrieval timeouts, disable the practice incident, restore the dependency, then retry a small workload.
+- For generation failures, check the configured prompt/model connection and roll back the prompt label if the regression aligns with the incident.
+- Keep the alert open until the error rate remains below 2% for the configured duration.
+
+## LowRetrievalSuccess
+
+- Signal: retrieval success rate (`tool_success == true`) is below 90% for 5 minutes.
+- Severity: warning.
+- User impact: answers may be incomplete, use fallback context, or fail.
+- Owner and channel: `student-2A202602652`, Slack `#k4-l3b-alerts`.
+
+Initial investigation:
+
+1. Confirm the retrieval success rate and traffic volume in the dashboard error panel.
+2. Filter logs for `tool_name=retrieval` and `tool_success=false`; capture a relevant `correlation_id`.
+3. Open the trace with that correlation ID and inspect the `retrieval` observation for an error or abnormal duration.
+
+Mitigation:
+
+- Disable the practice failure scenario and validate vector-store availability.
+- Retry the same query after recovery, then confirm retrieval success is at least 90%.
+- Add a regression test or dependency health check when the failure mode is understood.
